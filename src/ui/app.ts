@@ -335,7 +335,7 @@ export class TraceApp extends LitElement {
                 </div>
               </div>
             `
-          : nothing}`}
+          : nothing}
 
         ${this.error
           ? html`<div class="callout danger" style="margin-top: 16px;">${this.error}</div>`
