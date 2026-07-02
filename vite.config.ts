@@ -4,10 +4,19 @@ import { defineConfig } from "vite";
 export default defineConfig({
   root: resolve(__dirname, "src/ui"),
   build: {
-    outDir: resolve(__dirname, "dist/ui"),
+    outDir: resolve(__dirname, "dist/extension"),
     emptyOutDir: true,
     rollupOptions: {
-      input: resolve(__dirname, "src/ui/index.html"),
+      input: {
+        main: resolve(__dirname, "src/ui/index.html"),
+        background: resolve(__dirname, "src/extension/background.ts"),
+      },
+      output: {
+        entryFileNames: (chunk) => {
+          if (chunk.name === "background") return "background.js";
+          return "assets/[name]-[hash].js";
+        },
+      },
     },
   },
   esbuild: {
@@ -19,11 +28,6 @@ export default defineConfig({
     },
   },
   server: {
-    proxy: {
-      "/api": {
-        target: "http://localhost:3000",
-        changeOrigin: true,
-      },
-    },
+    open: false,
   },
 });

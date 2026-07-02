@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "LLM Trace Viewer",
+  "version": "0.1.1",
+  "description": "View LLM request trace logs (JSONL format) in a beautiful web UI",
+  "author": "wisetwo",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "LLM Trace Viewer"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [],
+  "host_permissions": [],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

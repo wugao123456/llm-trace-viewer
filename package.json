@@ -1,76 +1,39 @@
 {
   "name": "llm-trace-viewer",
   "version": "0.1.1",
-  "description": "A standalone CLI tool to view LLM request trace logs (JSONL format) in a beautiful web UI",
+  "private": true,
+  "description": "A browser extension to view LLM request trace logs (JSONL format) in a beautiful web UI",
   "keywords": [
-    "cli",
+    "chrome-extension",
     "jsonl",
     "llm",
     "log",
     "trace",
     "viewer",
     "ai",
-    "debug",
-    "openai",
-    "anthropic"
+    "debug"
   ],
   "license": "MIT",
   "author": "wisetwo",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wisetwo/llm-trace-viewer.git"
+    "url": "git+https://github.com/wugao123456/llm-trace-viewer.git"
   },
-  "homepage": "https://github.com/wisetwo/llm-trace-viewer#readme",
-  "bugs": {
-    "url": "https://github.com/wisetwo/llm-trace-viewer/issues"
-  },
-  "bin": {
-    "llm-trace-viewer": "./bin/trace-viewer.js"
-  },
-  "files": [
-    "dist",
-    "bin",
-    "README.md"
-  ],
   "type": "module",
-  "main": "./dist/server/index.js",
-  "types": "./dist/shared/types.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/shared/types.d.ts",
-      "import": "./dist/server/index.js"
-    },
-    "./types": {
-      "types": "./dist/shared/types.d.ts",
-      "import": "./dist/shared/types.js"
-    }
-  },
   "scripts": {
-    "build": "npm run build:ui && npm run build:server",
-    "build:server": "tsc -p tsconfig.server.json",
+    "build": "npm run build:ui && npm run build:icons && npm run build:manifest",
     "build:ui": "vite build",
+    "build:icons": "npx tsx scripts/generate-icons.ts",
+    "build:manifest": "cp manifest.json dist/extension/manifest.json",
     "dev": "vite",
-    "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build",
-    "release": "npm run typecheck && npm run build && npm publish",
-    "release:patch": "npm version patch && npm run release",
-    "release:minor": "npm version minor && npm run release",
-    "release:major": "npm version major && npm run release"
-  },
-  "dependencies": {
-    "commander": "^12.1.0",
-    "express": "^4.21.0",
-    "open": "^10.1.0"
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
+    "@types/chrome": "^0.0.272",
     "@types/node": "^22.0.0",
     "lit": "^3.3.2",
+    "tsx": "^3.14.0",
     "typescript": "^5.6.0",
-    "vite": "^6.0.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "vite": "^4.5.0"
   }
 }

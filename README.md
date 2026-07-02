@@ -1,252 +1,135 @@
-# Trace Viewer
+# LLM Trace Viewer
 
-A standalone CLI tool to view **LLM request trace logs** (JSONL format) in a beautiful web UI.
+一个查看 **LLM 请求追踪日志** 的浏览器插件，在美观的 Web UI 中浏览系统提示词、消息历史、工具定义等信息。
 
-Built for debugging and inspecting the full context that is sent to LLM providers — system prompts, message history, tool definitions, and more.
+A browser extension to view **LLM request trace logs** in a beautiful web UI.
 
-![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+Supports JSONL trace files and nginx access logs with embedded `request_body` — drag & drop a file to browse system prompts, message history, tool definitions, and more.
+
+![Chrome Extension](https://img.shields.io/badge/chrome-extension-blue)
 ![License](https://img.shields.io/badge/license-MIT-blue)
+![alt text](image.png)
 
-## Features
+## 功能 / Features
 
-- 📄 **Paginated list view** — Browse trace entries with pagination (newest first)
-- 🔍 **Detail modal** — View full messages, tools, system prompts, and errors
-- 🖼️ **Image support** — Preview base64-encoded images with lightbox
-- 🌗 **Dark / Light theme** — Automatic detection + manual toggle
-- 💾 **Download** — Export individual trace entries as JSON
-- 👀 **Watch mode** — Auto-refresh when the log file changes
+- 拖拽或文件选择器加载追踪日志（支持 JSONL 和 nginx access log 格式）
+- 自动保存上次打开的文件（File System Access API + IndexedDB），下次一键刷新
+- 分页列表视图，按时间倒序浏览
+- 详情弹窗，查看完整消息、工具、系统提示词、错误信息
+- 图片支持，base64 图片缩略图 + 灯箱预览
+- 深色/浅色主题，自动检测 + 手动切换
+- 导出单条记录为 JSON 下载
 
-## Screenshots
+## 安装 / Installation
 
-![Default View](./docs/screenshots/default-view.png)
-
-![Detail Modal](./docs/screenshots/detail-modal.png)
-
-## Usage with OpenClaw
-
-If you're using [OpenClaw](https://docs.openclaw.ai), you can enable `diagnostics.cacheTrace` to log LLM request traces, then use this tool to visualize them.
-
-### 1. Enable cache trace logging
-
-Add the following to your OpenClaw config (`~/.openclaw/openclaw.json`):
-
-```json
-{
-  "diagnostics": {
-    "cacheTrace": {
-      "enabled": true,
-      "includeMessages": true,
-      "includePrompt": true,
-      "includeSystem": true
-    }
-  }
-}
-```
-
-Or use an environment variable for a one-off session:
+### 以 Chrome 插件方式加载 / Load as Chrome Extension
 
 ```bash
-OPENCLAW_CACHE_TRACE=1 openclaw
+# 克隆项目 / Clone
+git clone https://github.com/wugao123456/llm-trace-viewer.git
+cd llm-trace-viewer
+npm install
+npm run build
 ```
 
-See the [Prompt Caching documentation](https://docs.openclaw.ai/reference/prompt-caching#diagnostics-cachetrace-config) for the full list of options.
+然后在 Chrome 中加载 / Then in Chrome:
 
-### 2. View the trace log
+1. 打开 `chrome://extensions/`
+2. 开启右上角的 **「开发者模式」**
+3. 点击 **「加载已解压的扩展程序」**
+4. 选择 `dist/extension/` 目录
 
-```bash
-# Default log location
-llm-trace-viewer ~/.openclaw/logs/cache-trace.jsonl
+### 使用方法 / Usage
 
-# Watch mode — auto-refreshes as new entries are appended
-llm-trace-viewer ~/.openclaw/logs/cache-trace.jsonl --watch
-```
+点击工具栏中的插件图标，自动打开新标签页：
 
-## Installation
+- **拖拽** `.jsonl` 或 `.log` 文件到页面
+- 或点击 **Choose File** 按钮选择文件
 
-```bash
-# Install globally
-npm install -g llm-trace-viewer
+首次加载后文件会被记住，下次打开页面会显示 **Quick Reload** 按钮，一键重新加载最新日志。
 
-# Or use npx (no install required)
-npx llm-trace-viewer ./path/to/trace.jsonl
-```
+## 支持的格式 / Supported Formats
 
-## Quick Start
+### JSONL 格式
 
-```bash
-# Point to a JSONL file
-llm-trace-viewer ./logs/cache-trace.jsonl
-
-# Point to a directory (auto-finds *.jsonl files)
-llm-trace-viewer ./logs/
-
-# Custom port + watch mode
-llm-trace-viewer ./logs/trace.jsonl --port 8080 --watch
-
-# Don't auto-open browser
-llm-trace-viewer ./logs/trace.jsonl --no-open
-```
-
-## CLI Options
-
-| Option                | Description             | Default |
-| --------------------- | ----------------------- | ------- |
-| `<path>`              | Path to `.jsonl` file or directory (required) | — |
-| `-p, --port <number>` | Port to listen on       | `3000`  |
-| `--no-open`           | Don't auto-open browser | `false` |
-| `-w, --watch`         | Watch file for changes  | `false` |
-
-## JSONL Format
-
-The viewer reads **JSONL** (JSON Lines) files — one JSON object per line. It is designed to be flexible: only `ts` and `seq` are required, all other fields are optional and will be rendered when present.
-
-### Minimal Example
+每行一个 JSON 对象，只需 `ts` 和 `seq` 字段：
 
 ```json
 {"ts":"2025-04-10T10:30:00.000Z","seq":1,"stage":"stream:context","provider":"openai","modelId":"gpt-4o","messages":[{"role":"user","content":"Hello"}]}
 ```
 
-### Full Example (OpenClaw-style trace)
+### Nginx Access Log 格式
 
-```json
-{
-  "ts": "2025-04-10T10:30:00.000Z",
-  "seq": 42,
-  "stage": "stream:context",
-  "runId": "run-abc123",
-  "sessionId": "sess-xyz",
-  "sessionKey": "agent:main:main",
-  "provider": "anthropic",
-  "modelId": "claude-sonnet-4-20250514",
-  "modelApi": "messages",
-  "system": "You are a helpful coding assistant...",
-  "prompt": null,
-  "messages": [
-    { "role": "user", "content": "Refactor the auth module" },
-    { "role": "assistant", "content": [
-      { "type": "text", "text": "I'll help you refactor..." },
-      { "type": "toolCall", "name": "readFile", "arguments": { "path": "src/auth.ts" } }
-    ]},
-    { "role": "toolResult", "content": "export function login()..." }
-  ],
-  "tools": [
-    { "name": "readFile", "description": "Read a file from the workspace" },
-    { "name": "writeFile", "description": "Write content to a file" }
-  ],
-  "messageCount": 3,
-  "toolCount": 2,
-  "note": "cache hit",
-  "error": null
-}
+自动解析 nginx 日志中的 `request_body` 字段：
+
+```
+127.0.0.1 - [30/Jun/2026:20:39:33 +0800] "POST /v1/chat/completions HTTP/1.1" 200 25384 "" "hertz" "::1" "request_body:{...}" "upstream_response_time:11.732" "upstream_addr:..."
 ```
 
-### Field Reference
+### 字段说明 / Field Reference
 
-The table below describes all fields the viewer understands. **Bold** fields are required; all others are optional.
-
-| Field | Type | Description |
+| 字段 | 类型 | 说明 |
 | ----- | ---- | ----------- |
-| **`ts`** | `string` | ISO 8601 timestamp. Displayed in the list and detail views. |
-| **`seq`** | `number` | Unique sequence number (monotonically increasing). Used to fetch individual entries. |
-| `stage` | `string` | Phase / stage label. The viewer colorizes badges by prefix: `session:*` → blue, `prompt:*` → yellow, `stream:*` → green. |
-| `runId` | `string` | Unique ID for the current run or invocation. Shown in detail meta. |
-| `sessionId` | `string` | Session identifier. Shown in detail meta. |
-| `sessionKey` | `string` | Human-readable session key (e.g. `"agent:main:main"`). Shown in both list and detail. |
-| `provider` | `string` | LLM provider name (e.g. `"openai"`, `"anthropic"`). Shown as a badge. |
-| `modelId` | `string` | Model identifier (e.g. `"gpt-4o"`, `"claude-sonnet-4-20250514"`). |
-| `modelApi` | `string \| null` | Model API type (e.g. `"chat"`, `"messages"`). |
-| `system` | `string \| object` | System prompt. Rendered as expandable preformatted text. |
-| `prompt` | `string` | User prompt text. Rendered as expandable preformatted text. |
-| `messages` | `array` | Message history. Each item should have `role` and `content`. Content can be a string or an array of typed blocks (`text`, `image`, `thinking`, `toolCall`). |
-| `tools` | `array` | Tool definitions. Each item should have `name` and optionally `description`. |
-| `messageCount` | `number` | Pre-computed message count (falls back to `messages.length`). |
-| `toolCount` | `number` | Pre-computed tool count (falls back to `tools.length`). |
-| `note` | `string` | Free-form note. Shown in detail meta. |
-| `error` | `string` | Error message. Rendered in a red callout. |
+| **`ts`** | `string` | ISO 8601 时间戳 |
+| **`seq`** | `number` | 唯一序列号 |
+| `stage` | `string` | 阶段标签（`session:*` 蓝色, `prompt:*` 黄色, `stream:*` 绿色） |
+| `sessionKey` | `string` | 会话标识符 |
+| `provider` | `string` | LLM 提供商名称 |
+| `modelId` | `string` | 模型标识符 |
+| `system` | `string \| object` | 系统提示词 |
+| `prompt` | `string` | 用户提示词 |
+| `messages` | `array` | 消息历史（role + content） |
+| `tools` | `array` | 工具定义（name + description） |
+| `messageCount` | `number` | 消息数量 |
+| `toolCount` | `number` | 工具数量 |
+| `error` | `string` | 错误信息（红色高亮） |
 
-### Message Content Types
+### 消息内容类型 / Message Content Types
 
-Inside the `messages[].content` array, the viewer recognizes these object shapes:
-
-| `type` | Rendered as |
+| `type` | 渲染方式 |
 | ------ | ----------- |
-| `"text"` | Preformatted text block (reads `.text` field) |
-| `"image"` | Clickable image thumbnail with lightbox (reads `.data` base64 + `.mimeType`) |
-| `"thinking"` | Yellow-bordered thinking block (reads `.thinking` field) |
-| `"toolCall"` | Blue-bordered tool call block with name and JSON arguments |
+| `"text"` | 预格式化文本块 |
+| `"image"` | 可点击缩略图 + 灯箱 |
+| `"thinking"` | 黄色边框思维块 |
+| `"toolCall"` | 蓝色边框工具调用（含 JSON 参数） |
 
-If `content` is a plain string, it is rendered as text directly. Base64 image strings are auto-detected and shown as thumbnails.
+## 项目架构 / Architecture
 
-## Programmatic Usage
-
-You can also use the server programmatically:
-
-```typescript
-import { createServer } from "llm-trace-viewer";
-
-const server = await createServer({
-  port: 3000,
-  filePath: "./logs/cache-trace.jsonl",
-  watch: true,
-});
-
-const { url } = await server.start();
-console.log(`Viewer running at ${url}`);
-
-// Later...
-await server.stop();
+```
+llm-trace-viewer/
+├── manifest.json              # Chrome 扩展清单 (MV3)
+├── src/
+│   ├── extension/
+│   │   └── background.ts      # Service Worker（点击图标打开新标签页）
+│   └── ui/
+│       ├── index.html         # 入口 HTML
+│       ├── main.ts            # 应用启动
+│       ├── app.ts             # 主 Lit 组件（状态管理、路由、文件加载）
+│       ├── trace-view.ts      # 渲染逻辑（表格、弹窗、分页）
+│       ├── file-parser.ts     # 本地文件解析器（JSONL + nginx 日志）
+│       ├── file-store.ts      # IndexedDB 持久化（快速重新加载）
+│       ├── styles.ts          # CSS 样式（主题变量）
+│       ├── dropzone-styles.ts # 拖拽区样式
+│       └── types.ts           # TypeScript 类型定义
+├── scripts/
+│   └── generate-icons.ts      # 图标生成
+├── vite.config.ts             # Vite 构建配置（多入口）
+├── package.json
+└── tsconfig.json
 ```
 
-### Types
+- **UI** (`src/ui/`): 基于 [Lit](https://lit.dev/) Web Components 的单页应用
+- **Parser** (`file-parser.ts`): 自动检测 JSONL vs nginx 日志格式，纯浏览器端解析
+- **Persistence** (`file-store.ts`): File System Access API + IndexedDB 实现文件记忆与快速重载
 
-The package exports all type definitions for building custom integrations:
-
-```typescript
-import type { TraceEntry, TraceSummary, TraceToolDef } from "llm-trace-viewer/types";
-```
-
-## Development
+## 开发 / Development
 
 ```bash
-# Clone the repo
-git clone https://github.com/wisetwo/llm-trace-viewer.git
-cd llm-trace-viewer
-
-# Install dependencies
 npm install
-
-# Start dev server (Vite HMR for UI, proxy to Express backend)
-npm run dev
-
-# In another terminal, start the Express backend
-npx ts-node --esm src/cli/index.ts ./path/to/your/trace.jsonl
-
-# Build for production
-npm run build
-
-# Type check
-npm run typecheck
+npm run dev        # Vite 开发服务器 → http://localhost:5173
+npm run build      # 生产构建 → dist/extension/
+npm run typecheck  # TypeScript 类型检查
 ```
-
-### Architecture
-
-```
-trace-viewer/
-├── bin/                  # CLI entry point (shim)
-├── src/
-│   ├── cli/              # Commander CLI definition
-│   ├── server/           # Express HTTP server + JSONL reader
-│   ├── shared/           # Shared TypeScript types
-│   └── ui/               # Lit web components (built by Vite)
-├── dist/                 # Build output (git-ignored)
-├── tsconfig.json         # Base TS config (UI + shared)
-├── tsconfig.server.json  # Server-only TS config
-└── vite.config.ts        # Vite config (UI build)
-```
-
-- **Server** (`src/server/`): Express app with REST API for reading and paginating JSONL entries. Serves the built UI as static files.
-- **UI** (`src/ui/`): Single-page app built with [Lit](https://lit.dev/) web components. Features a table view, detail modal, theme system, and image lightbox.
-- **CLI** (`src/cli/`): Thin wrapper using [Commander](https://github.com/tj/commander.js) that starts the server and optionally opens the browser.
 
 ## License
 
