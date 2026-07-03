@@ -1,6 +1,13 @@
 /**
- * Trace View Component
- * Main rendering logic for trace entries and details modal
+ * Trace 视图渲染模块
+ * 负责 trace 条目列表和详情弹窗的主要渲染逻辑
+ * 
+ * 核心功能：
+ * 1. 渲染 trace 列表表格（含分页）
+ * 2. 渲染详情弹窗（含完整的 entry 数据）
+ * 3. 支持图片灯箱预览
+ * 4. 支持可展开的长内容区域
+ * 5. 支持下载单条 entry 为 JSON 文件
  */
 
 import { html, nothing } from "lit";
@@ -10,6 +17,8 @@ import type {
   TraceStage,
   TraceToolDef,
 } from "./types.js";
+
+// ── 类型定义 ───────────────────────────────────────────────────────
 
 export interface TraceProps {
   loading: boolean;
@@ -22,13 +31,30 @@ export interface TraceProps {
   totalLines: number;
   detailEntry: TraceEntry | null;
   detailLoading: boolean;
+  focusSection: string | null;
+  compareEntry: TraceEntry | null;
+  compareOldEntry: TraceEntry | null;
   onRefresh: () => void;
   onPageChange: (page: number) => void;
-  onViewDetail: (summary: TraceSummary) => void;
+  onViewDetail: (summary: TraceSummary, focusSection?: string) => void;
   onCloseDetail: () => void;
+  onCompare: (summary: TraceSummary) => void;
+  onCloseCompare: () => void;
 }
 
-/** Open image lightbox */
+/** 单条差异描述 */
+interface DiffItem {
+  label: string;
+  oldValue: string | null;
+  newValue: string | null;
+}
+
+// ── 工具函数 ───────────────────────────────────────────────────────
+
+/**
+ * 打开图片灯箱预览
+ * 支持点击遮罩或按 Esc 键关闭
+ */
 function openImageLightbox(dataUrl: string, mimeType: string) {
   const existing = document.getElementById("trace-image-lightbox");
   if (existing) {
@@ -50,15 +76,18 @@ function openImageLightbox(dataUrl: string, mimeType: string) {
     </div>
   `;
 
+  // 点击遮罩关闭
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) {
       overlay.remove();
     }
   });
 
+  // 点击关闭按钮
   const closeBtn = overlay.querySelector(".trace-lightbox-close");
   closeBtn?.addEventListener("click", () => overlay.remove());
 
+  // 按 Esc 键关闭
   const handleKeydown = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       overlay.remove();
@@ -70,6 +99,10 @@ function openImageLightbox(dataUrl: string, mimeType: string) {
   document.body.appendChild(overlay);
 }
 
+/**
+ * 格式化时间戳显示
+ * 支持 ISO 格式和其他常见格式
+ */
 function formatTime(value?: string | null) {
   if (!value) {
     return "";
@@ -81,6 +114,10 @@ function formatTime(value?: string | null) {
   return date.toLocaleString();
 }
 
+/**
+ * 根据 stage 类型返回对应的 badge CSS 类名
+ * 用于不同阶段显示不同颜色
+ */
 function stageBadgeClass(stage?: TraceStage): string {
   if (!stage) {
     return "";
@@ -97,6 +134,10 @@ function stageBadgeClass(stage?: TraceStage): string {
   return "";
 }
 
+/**
+ * 判断字符串是否为 base64 编码的图片
+ * 通过检测图片格式的魔数（magic number）来识别
+ */
 function isBase64Image(str: string): boolean {
   if (str.length < 100) {
     return false;
@@ -104,6 +145,9 @@ function isBase64Image(str: string): boolean {
   return /^\/9j\/|^iVBOR|^R0lGOD|^UklGR|^Qk1Q/i.test(str);
 }
 
+/**
+ * 截断过长的 base64 字符串，避免渲染性能问题
+ */
 function truncateBase64(str: string, maxLen = 50): string {
   if (str.length <= maxLen) {
     return str;
@@ -111,6 +155,9 @@ function truncateBase64(str: string, maxLen = 50): string {
   return `${str.slice(0, maxLen)}...`;
 }
 
+/**
+ * 渲染多行文本内容，保留换行符
+ */
 function renderTextContent(content: string) {
   const lines = content.split("\n");
   return html`${lines.map((line, i) =>
@@ -118,11 +165,19 @@ function renderTextContent(content: string) {
   )}`;
 }
 
+// ── 消息内容渲染 ───────────────────────────────────────────────────
+
+/**
+ * 递归渲染消息内容
+ * 支持多种类型：字符串、数组、图片、文本块、思考内容、工具调用等
+ */
 function renderMessageContent(content: unknown): ReturnType<typeof html> {
+  // null/undefined
   if (content == null) {
     return html`<span class="muted">null</span>`;
   }
 
+  // 字符串类型（可能是 base64 图片或普通文本）
   if (typeof content === "string") {
     if (isBase64Image(content)) {
       return html`<span class="trace-base64">${truncateBase64(content)}</span>`;
@@ -130,6 +185,7 @@ function renderMessageContent(content: unknown): ReturnType<typeof html> {
     return html`<div class="trace-content-block trace-text-content">${renderTextContent(content)}</div>`;
   }
 
+  // 数组类型（多模态内容）
   if (Array.isArray(content)) {
     return html`
       <div class="trace-array">
@@ -145,9 +201,11 @@ function renderMessageContent(content: unknown): ReturnType<typeof html> {
     `;
   }
 
+  // 对象类型（结构化内容）
   if (typeof content === "object") {
     const obj = content as Record<string, unknown>;
 
+    // 图片类型（多模态）
     if (obj.type === "image" && typeof obj.data === "string") {
       const mimeType = (obj.mimeType as string) || "image/jpeg";
       const dataUrl = `data:${mimeType};base64,${obj.data}`;
@@ -165,6 +223,7 @@ function renderMessageContent(content: unknown): ReturnType<typeof html> {
       `;
     }
 
+    // 文本类型
     if (obj.type === "text" && typeof obj.text === "string") {
       return html`
         <div class="trace-text-block trace-content-block">
@@ -174,6 +233,7 @@ function renderMessageContent(content: unknown): ReturnType<typeof html> {
       `;
     }
 
+    // 思考内容类型
     if (obj.type === "thinking" && typeof obj.thinking === "string") {
       return html`
         <div class="trace-thinking-block trace-content-block trace-content-block--thinking">
@@ -183,6 +243,7 @@ function renderMessageContent(content: unknown): ReturnType<typeof html> {
       `;
     }
 
+    // 工具使用类型（tool_use）
     if (obj.type === "tool_use") {
       return html`
         <div class="trace-tool-block trace-content-block trace-content-block--tool">
@@ -192,6 +253,7 @@ function renderMessageContent(content: unknown): ReturnType<typeof html> {
       `;
     }
 
+    // 工具调用类型（toolCall）
     if (obj.type === "toolCall") {
       return html`
         <div class="trace-tool-block trace-content-block trace-content-block--tool">
@@ -201,6 +263,7 @@ function renderMessageContent(content: unknown): ReturnType<typeof html> {
       `;
     }
 
+    // 其他对象类型：递归渲染每个字段
     return html`
       <div class="trace-object">
         ${Object.entries(obj).map(([key, value]) => {
@@ -223,10 +286,16 @@ function renderMessageContent(content: unknown): ReturnType<typeof html> {
     `;
   }
 
+  // 默认：序列化为字符串
   const stringValue = JSON.stringify(content);
   return html`<span class="trace-value">${stringValue}</span>`;
 }
 
+// ── 可展开区域控制 ─────────────────────────────────────────────────
+
+/**
+ * 切换可展开区域的展开/收起状态
+ */
 function toggleExpand(e: Event) {
   const btn = e.target as HTMLElement;
   const container = btn.closest(".trace-expandable-container");
@@ -249,6 +318,46 @@ function toggleExpand(e: Event) {
   }
 }
 
+/**
+ * 切换整个 section 的显示/隐藏状态
+ */
+function toggleSection(e: Event) {
+  const section = (e.target as HTMLElement).closest(".trace-flat-section");
+  if (!section) {
+    return;
+  }
+
+  const content = section.querySelector(".trace-flat-content") as HTMLElement;
+  if (!content) {
+    return;
+  }
+
+  const isCollapsed = section.classList.contains("collapsed");
+  const toggleBtn = section.querySelector(".trace-section-toggle");
+
+  if (isCollapsed) {
+    content.style.maxHeight = `${content.scrollHeight}px`;
+    section.classList.remove("collapsed");
+    if (toggleBtn) {
+      toggleBtn.textContent = "\u25BC";
+      toggleBtn.setAttribute("title", "Collapse");
+    }
+  } else {
+    content.style.maxHeight = `${content.scrollHeight}px`;
+    requestAnimationFrame(() => {
+      content.style.maxHeight = "0";
+    });
+    section.classList.add("collapsed");
+    if (toggleBtn) {
+      toggleBtn.textContent = "\u25B6";
+      toggleBtn.setAttribute("title", "Expand");
+    }
+  }
+}
+
+/**
+ * 检查内容是否溢出，决定是否显示展开按钮
+ */
 function checkOverflow(container: Element) {
   const content = container.querySelector(".trace-expandable-content") as HTMLElement;
   if (!content) {
@@ -261,6 +370,10 @@ function checkOverflow(container: Element) {
   }
 }
 
+/**
+ * 设置溢出检测
+ * 在渲染完成后（requestAnimationFrame）检查所有可展开区域
+ */
 export function setupOverflowDetection(root?: Document | DocumentFragment | ShadowRoot | Element) {
   requestAnimationFrame(() => {
     const searchRoot = root || document;
@@ -271,9 +384,25 @@ export function setupOverflowDetection(root?: Document | DocumentFragment | Shad
       container.classList.add("overflow-checked");
       checkOverflow(container);
     });
+
+    const sections = searchRoot.querySelectorAll(".trace-flat-section");
+    sections.forEach((section) => {
+      if (!section.classList.contains("collapsed")) {
+        const content = section.querySelector(".trace-flat-content") as HTMLElement;
+        if (content) {
+          content.style.maxHeight = `${content.scrollHeight}px`;
+        }
+      }
+    });
   });
 }
 
+// ── JSON Schema 属性渲染 ───────────────────────────────────────────
+
+/**
+ * 递归渲染 JSON Schema 的 properties
+ * 用于展示工具参数的结构定义
+ */
 function renderJsonSchemaProperties(
   properties: Record<string, Record<string, unknown>>,
   required: string[] = [],
@@ -334,7 +463,13 @@ function renderJsonSchemaProperties(
   `;
 }
 
-function renderToolDef(tool: TraceToolDef) {
+// ── 工具定义渲染 ───────────────────────────────────────────────────
+
+/**
+ * 渲染单个工具定义（名称、描述、参数）
+ * 支持折叠/展开
+ */
+function renderToolDef(tool: TraceToolDef, index: number) {
   const params = tool.parameters as Record<string, unknown> | undefined;
   const properties = params?.properties as
     | Record<string, Record<string, unknown>>
@@ -343,24 +478,71 @@ function renderToolDef(tool: TraceToolDef) {
 
   return html`
     <div class="trace-tool-def">
-      <div class="trace-tool-def-header">
+      <div class="trace-tool-def-header" @click=${toggleToolDef}>
+        <button class="trace-tool-def-toggle" title="Collapse">▼</button>
+        <span class="trace-tool-def-index">#${index + 1}</span>
         <span class="trace-tool-name">${tool.name}</span>
+        ${tool.description
+          ? html`<span class="trace-tool-def-desc-preview">${tool.description.slice(0, 60)}${tool.description.length > 60 ? "..." : ""}</span>`
+          : nothing}
       </div>
-      ${tool.description
-        ? html`<div class="trace-tool-description">${tool.description}</div>`
-        : nothing}
-      ${properties
-        ? html`
-            <div class="trace-tool-params">
-              <div class="trace-tool-params-title">Parameters</div>
-              ${renderJsonSchemaProperties(properties, required ?? [])}
-            </div>
-          `
-        : nothing}
+      <div class="trace-tool-def-body">
+        ${tool.description
+          ? html`<div class="trace-tool-description">${tool.description}</div>`
+          : nothing}
+        ${properties
+          ? html`
+              <div class="trace-tool-params">
+                <div class="trace-tool-params-title">Parameters</div>
+                ${renderJsonSchemaProperties(properties, required ?? [])}
+              </div>
+            `
+          : nothing}
+      </div>
     </div>
   `;
 }
 
+/**
+ * 切换单个工具定义的折叠/展开
+ */
+function toggleToolDef(e: Event) {
+  const header = (e.target as HTMLElement).closest(".trace-tool-def-header");
+  if (!header) return;
+  const toolDef = header.closest(".trace-tool-def") as HTMLElement;
+  if (!toolDef) return;
+
+  const body = toolDef.querySelector(".trace-tool-def-body") as HTMLElement;
+  if (!body) return;
+
+  const isCollapsed = toolDef.classList.contains("collapsed");
+  const toggleBtn = toolDef.querySelector(".trace-tool-def-toggle");
+
+  if (isCollapsed) {
+    toolDef.classList.remove("collapsed");
+    body.style.maxHeight = `${body.scrollHeight}px`;
+    if (toggleBtn) {
+      toggleBtn.textContent = "\u25BC";
+      toggleBtn.setAttribute("title", "Collapse");
+    }
+  } else {
+    body.style.maxHeight = `${body.scrollHeight}px`;
+    requestAnimationFrame(() => {
+      body.style.maxHeight = "0";
+    });
+    toolDef.classList.add("collapsed");
+    if (toggleBtn) {
+      toggleBtn.textContent = "\u25B6";
+      toggleBtn.setAttribute("title", "Expand");
+    }
+  }
+}
+
+// ── 消息渲染 ───────────────────────────────────────────────────────
+
+/**
+ * 渲染单条消息（包含角色、索引、时间戳、内容、工具调用）
+ */
 function renderMessage(message: unknown, index: number) {
   const msg = message as Record<string, unknown>;
   const role = (msg.role as string) || "unknown";
@@ -371,20 +553,277 @@ function renderMessage(message: unknown, index: number) {
 
   return html`
     <div class="trace-message">
-      <div class="trace-message-header">
+      <div class="trace-message-header" @click=${toggleMessage}>
+        <button class="trace-message-toggle" title="Collapse message">▼</button>
         <span class="trace-message-role ${role}">${role}</span>
         <span class="trace-message-index">#${index + 1}</span>
         ${timestamp ? html`<span class="trace-message-time mono">${timestamp}</span>` : nothing}
         ${msg.model ? html`<span class="trace-message-model mono">${msg.model}</span>` : nothing}
       </div>
       <div class="trace-message-body trace-expandable-container">
-        <div class="trace-expandable-content">${renderMessageContent(content)}</div>
+        <div class="trace-expandable-content">
+          ${renderMessageContent(content)}
+          ${renderToolCalls(msg.tool_calls)}
+        </div>
         <button class="trace-expand-btn" @click=${toggleExpand}>Show more ↓</button>
       </div>
     </div>
   `;
 }
 
+/**
+ * 切换单条消息的折叠/展开状态
+ */
+function toggleMessage(e: Event) {
+  const btn = e.target as HTMLElement;
+  const message = btn.closest(".trace-message");
+  if (!message) {
+    return;
+  }
+
+  const body = message.querySelector(".trace-message-body") as HTMLElement;
+  if (!body) {
+    return;
+  }
+
+  const isCollapsed = message.classList.contains("collapsed");
+  const toggleBtn = message.querySelector(".trace-message-toggle");
+
+  if (isCollapsed) {
+    message.classList.remove("collapsed");
+    body.style.maxHeight = `${body.scrollHeight}px`;
+    if (toggleBtn) {
+      toggleBtn.textContent = "\u25BC";
+      toggleBtn.setAttribute("title", "Collapse message");
+    }
+  } else {
+    body.style.maxHeight = `${body.scrollHeight}px`;
+    requestAnimationFrame(() => {
+      body.style.maxHeight = "0";
+    });
+    message.classList.add("collapsed");
+    if (toggleBtn) {
+      toggleBtn.textContent = "\u25B6";
+      toggleBtn.setAttribute("title", "Expand message");
+    }
+  }
+}
+
+/**
+ * 渲染 assistant 消息中的 tool_calls 字段
+ * 格式：[{ id, type, function: { name, arguments } }]
+ */
+function renderToolCalls(toolCalls: unknown): ReturnType<typeof html> | typeof nothing {
+  if (!toolCalls || !Array.isArray(toolCalls)) {
+    return nothing;
+  }
+
+  if (toolCalls.length === 0) {
+    return nothing;
+  }
+
+  return html`
+    <div class="trace-tool-calls">
+      <div class="trace-tool-calls-title">Tool Calls (${toolCalls.length})</div>
+      ${toolCalls.map((tc, idx) => {
+        const call = tc as Record<string, unknown>;
+        const func = call.function as Record<string, unknown> | undefined;
+        const name = func?.name as string | undefined;
+        const args = func?.arguments;
+
+        let argsDisplay = "";
+        if (typeof args === "string") {
+          try {
+            argsDisplay = JSON.stringify(JSON.parse(args), null, 2);
+          } catch {
+            argsDisplay = args;
+          }
+        } else if (args) {
+          argsDisplay = JSON.stringify(args, null, 2);
+        }
+
+        return html`
+          <div class="trace-tool-call">
+            <div class="trace-tool-call-header">
+              <span class="trace-tool-call-index">#${idx + 1}</span>
+              <span class="trace-tool-call-name">${name || "unknown"}</span>
+              ${call.id ? html`<span class="trace-tool-call-id mono">${call.id}</span>` : nothing}
+            </div>
+            <pre class="trace-tool-call-args">${argsDisplay}</pre>
+          </div>
+        `;
+      })}
+    </div>
+  `;
+}
+
+// ── 差异对比 ───────────────────────────────────────────────────────
+
+/** 将 undefined / null / 空字符串统一为 null，避免空值差异被当作有效变更 */
+function normalizeValue(v: unknown): string | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v === "string" && v.trim() === "") return null;
+  return typeof v === "string" ? v : JSON.stringify(v, null, 2);
+}
+
+/**
+ * 对比两个 TraceEntry 的差异，返回差异项列表
+ * 用于"和上一轮对比"功能
+ */
+function diffEntries(oldEntry: TraceEntry | null, newEntry: TraceEntry): DiffItem[] {
+  const diffs: DiffItem[] = [];
+
+  if (!oldEntry) {
+    diffs.push({ label: "状态", oldValue: null, newValue: "这是第一条记录，没有上一轮" });
+    return diffs;
+  }
+
+  // 对比 stage
+  if (normalizeValue(oldEntry.stage) !== normalizeValue(newEntry.stage)) {
+    diffs.push({
+      label: "Stage",
+      oldValue: normalizeValue(oldEntry.stage),
+      newValue: normalizeValue(newEntry.stage),
+    });
+  }
+
+  // 对比 provider
+  if (normalizeValue(oldEntry.provider) !== normalizeValue(newEntry.provider)) {
+    diffs.push({
+      label: "Provider",
+      oldValue: normalizeValue(oldEntry.provider),
+      newValue: normalizeValue(newEntry.provider),
+    });
+  }
+
+  // 对比 model
+  const oldModel = normalizeValue(oldEntry.modelId || oldEntry.modelApi);
+  const newModel = normalizeValue(newEntry.modelId || newEntry.modelApi);
+  if (oldModel !== newModel) {
+    diffs.push({
+      label: "Model",
+      oldValue: oldModel,
+      newValue: newModel,
+    });
+  }
+
+  // 对比 system
+  const oldSystem = normalizeValue(
+    typeof oldEntry.system === "string" ? oldEntry.system : JSON.stringify(oldEntry.system, null, 2)
+  );
+  const newSystem = normalizeValue(
+    typeof newEntry.system === "string" ? newEntry.system : JSON.stringify(newEntry.system, null, 2)
+  );
+  if (oldSystem !== newSystem) {
+    diffs.push({
+      label: "System Prompt",
+      oldValue: oldSystem,
+      newValue: newSystem,
+    });
+  }
+
+  // 对比 prompt
+  const oldPrompt = normalizeValue(oldEntry.prompt);
+  const newPrompt = normalizeValue(newEntry.prompt);
+  if (oldPrompt !== newPrompt) {
+    diffs.push({
+      label: "Prompt",
+      oldValue: oldPrompt,
+      newValue: newPrompt,
+    });
+  }
+
+  // 对比消息数量
+  const oldMsgCount = oldEntry.messages?.length ?? 0;
+  const newMsgCount = newEntry.messages?.length ?? 0;
+  if (oldMsgCount !== newMsgCount) {
+    diffs.push({
+      label: "Message Count",
+      oldValue: String(oldMsgCount),
+      newValue: String(newMsgCount),
+    });
+  }
+
+  // 对比 tool_calls 数量
+  const oldToolCalls = countToolCalls(oldEntry);
+  const newToolCalls = countToolCalls(newEntry);
+  if (oldToolCalls !== newToolCalls) {
+    diffs.push({
+      label: "Tool Calls",
+      oldValue: String(oldToolCalls),
+      newValue: String(newToolCalls),
+    });
+  }
+
+  // 对比工具定义
+  const oldTools = (oldEntry.tools ?? []) as TraceToolDef[];
+  const newTools = (newEntry.tools ?? []) as TraceToolDef[];
+  const oldToolNames = oldTools.map((t) => t.name);
+  const newToolNames = newTools.map((t) => t.name);
+  const added = newToolNames.filter((n) => !oldToolNames.includes(n));
+  const removed = oldToolNames.filter((n) => !newToolNames.includes(n));
+
+  if (added.length > 0) {
+    diffs.push({
+      label: "Tools Added",
+      oldValue: null,
+      newValue: added.join(", "),
+    });
+  }
+  if (removed.length > 0) {
+    diffs.push({
+      label: "Tools Removed",
+      oldValue: removed.join(", "),
+      newValue: null,
+    });
+  }
+
+  // 对比 options
+  const oldOptions = normalizeValue(oldEntry.options);
+  const newOptions = normalizeValue(newEntry.options);
+  if (oldOptions !== newOptions) {
+    diffs.push({
+      label: "Options",
+      oldValue: oldOptions,
+      newValue: newOptions,
+    });
+  }
+
+  // 对比 note
+  const oldNote = normalizeValue(oldEntry.note);
+  const newNote = normalizeValue(newEntry.note);
+  if (oldNote !== newNote) {
+    diffs.push({
+      label: "Note",
+      oldValue: oldNote,
+      newValue: newNote,
+    });
+  }
+
+  return diffs;
+}
+
+/** 统计 entry 中的 tool_calls 总数 */
+function countToolCalls(entry: TraceEntry): number {
+  let count = 0;
+  if (entry.messages) {
+    for (const msg of entry.messages) {
+      const m = msg as Record<string, unknown>;
+      const calls = m.tool_calls;
+      if (calls && Array.isArray(calls)) {
+        count += calls.length;
+      }
+    }
+  }
+  return count;
+}
+
+// ── 下载功能 ───────────────────────────────────────────────────────
+
+/**
+ * 将单条 TraceEntry 下载为 JSON 文件
+ * 使用 Blob + URL.createObjectURL 实现客户端下载
+ */
 function downloadEntryAsJson(entry: TraceEntry) {
   const formatted = JSON.stringify(entry, null, 2);
   const blob = new Blob([formatted], { type: "application/json" });
@@ -402,7 +841,14 @@ function downloadEntryAsJson(entry: TraceEntry) {
   URL.revokeObjectURL(url);
 }
 
-function renderDetailModal(entry: TraceEntry, loading: boolean, onClose: () => void) {
+// ── 详情弹窗渲染 ───────────────────────────────────────────────────
+
+/**
+ * 渲染详情弹窗
+ * 包含：元信息、系统提示词、用户提示词、消息列表、工具列表、错误信息
+ */
+function renderDetailModal(entry: TraceEntry, loading: boolean, onClose: () => void, focusSection?: string) {
+  // 格式化系统提示词（字符串或对象）
   const systemContent =
     typeof entry.system === "string"
       ? entry.system
@@ -410,13 +856,61 @@ function renderDetailModal(entry: TraceEntry, loading: boolean, onClose: () => v
         ? JSON.stringify(entry.system, null, 2)
         : null;
 
+  // 非加载状态时设置溢出检测
   if (!loading) {
     setupOverflowDetection();
   }
 
+  // 下载按钮点击处理（阻止事件冒泡）
   const handleDownload = (e: Event) => {
     e.stopPropagation();
     downloadEntryAsJson(entry);
+  };
+
+  // 展开所有 section
+  const handleExpandAll = (e: Event) => {
+    e.stopPropagation();
+    const modal = (e.target as HTMLElement).closest(".trace-modal");
+    if (!modal) return;
+    const sections = modal.querySelectorAll(".trace-flat-section");
+    sections.forEach((section) => {
+      section.classList.remove("collapsed");
+      const content = section.querySelector(".trace-flat-content") as HTMLElement;
+      if (content) {
+        content.style.maxHeight = `${content.scrollHeight}px`;
+      }
+      const toggleBtn = section.querySelector(".trace-section-toggle");
+      if (toggleBtn) {
+        toggleBtn.textContent = "\u25BC";
+        toggleBtn.setAttribute("title", "Collapse");
+      }
+    });
+  };
+
+  // 关闭所有 section
+  const handleCollapseAll = (e: Event) => {
+    e.stopPropagation();
+    const modal = (e.target as HTMLElement).closest(".trace-modal");
+    if (!modal) return;
+    const sections = modal.querySelectorAll(".trace-flat-section");
+    sections.forEach((section) => {
+      const content = section.querySelector(".trace-flat-content") as HTMLElement;
+      if (content) {
+        content.style.maxHeight = `${content.scrollHeight}px`;
+      }
+      requestAnimationFrame(() => {
+        section.classList.add("collapsed");
+        const c = section.querySelector(".trace-flat-content") as HTMLElement;
+        if (c) {
+          c.style.maxHeight = "0";
+        }
+      });
+      const toggleBtn = section.querySelector(".trace-section-toggle");
+      if (toggleBtn) {
+        toggleBtn.textContent = "\u25B6";
+        toggleBtn.setAttribute("title", "Expand");
+      }
+    });
   };
 
   return html`
@@ -437,6 +931,20 @@ function renderDetailModal(entry: TraceEntry, loading: boolean, onClose: () => v
           </div>
           <div class="trace-modal-actions">
             <button
+              class="btn btn--small btn--ghost"
+              @click=${handleExpandAll}
+              title="Expand all sections"
+            >
+              Expand All
+            </button>
+            <button
+              class="btn btn--small btn--ghost"
+              @click=${handleCollapseAll}
+              title="Collapse all sections"
+            >
+              Collapse All
+            </button>
+            <button
               class="btn btn--small btn--primary"
               @click=${handleDownload}
               title="Download as JSON"
@@ -451,7 +959,7 @@ function renderDetailModal(entry: TraceEntry, loading: boolean, onClose: () => v
           ${loading
             ? html`<div class="trace-loading">Loading details...</div>`
             : html`
-                <!-- Meta info -->
+                <!-- 元信息区域 -->
                 <div class="trace-meta-section">
                   <div class="trace-meta-row">
                     <div class="trace-meta-item">
@@ -503,78 +1011,102 @@ function renderDetailModal(entry: TraceEntry, loading: boolean, onClose: () => v
                     : nothing}
                 </div>
 
-                <!-- System Prompt -->
+                <!-- 系统提示词 -->
                 ${systemContent
                   ? html`
-                      <div class="trace-flat-section">
-                        <h3 class="trace-flat-title">System Prompt</h3>
-                        <div class="trace-expandable-container">
-                          <pre class="trace-content-block trace-expandable-content">
-${systemContent}</pre
-                          >
-                          <button class="trace-expand-btn" @click=${toggleExpand}>
-                            Show more ↓
+                      <div class="trace-flat-section ${focusSection ? "collapsed" : ""}">
+                        <h3 class="trace-flat-title" @click=${toggleSection}>
+                          <button class="trace-section-toggle" title="${focusSection ? "Expand" : "Collapse"}">
+                            ${focusSection ? "▶" : "▼"}
                           </button>
+                          System Prompt
+                        </h3>
+                        <div class="trace-flat-content">
+                          <div class="trace-expandable-container">
+                            <pre class="trace-content-block trace-expandable-content">
+${systemContent}</pre
+                            >
+                            <button class="trace-expand-btn" @click=${toggleExpand}>
+                              Show more ↓
+                            </button>
+                          </div>
                         </div>
                       </div>
                     `
                   : nothing}
 
-                <!-- Prompt -->
+                <!-- 用户提示词 -->
                 ${entry.prompt
                   ? html`
-                      <div class="trace-flat-section">
-                        <h3 class="trace-flat-title">Prompt</h3>
-                        <div class="trace-expandable-container">
-                          <pre class="trace-content-block trace-expandable-content">
-${entry.prompt}</pre
-                          >
-                          <button class="trace-expand-btn" @click=${toggleExpand}>
-                            Show more ↓
+                      <div class="trace-flat-section ${focusSection ? "collapsed" : ""}">
+                        <h3 class="trace-flat-title" @click=${toggleSection}>
+                          <button class="trace-section-toggle" title="${focusSection ? "Expand" : "Collapse"}">
+                            ${focusSection ? "▶" : "▼"}
                           </button>
+                          Prompt
+                        </h3>
+                        <div class="trace-flat-content">
+                          <div class="trace-expandable-container">
+                            <pre class="trace-content-block trace-expandable-content">
+${entry.prompt}</pre
+                            >
+                            <button class="trace-expand-btn" @click=${toggleExpand}>
+                              Show more ↓
+                            </button>
+                          </div>
                         </div>
                       </div>
                     `
                   : nothing}
 
-                <!-- Messages -->
+                <!-- 消息列表 -->
                 ${entry.messages && entry.messages.length > 0
                   ? html`
-                      <div class="trace-flat-section">
-                        <h3 class="trace-flat-title">
+                      <div class="trace-flat-section ${focusSection ? "collapsed" : ""}">
+                        <h3 class="trace-flat-title" @click=${toggleSection}>
+                          <button class="trace-section-toggle" title="${focusSection ? "Expand" : "Collapse"}">
+                            ${focusSection ? "▶" : "▼"}
+                          </button>
                           Messages
                           <span class="trace-count">(${entry.messages.length})</span>
                         </h3>
-                        <div class="trace-messages-list">
-                          ${entry.messages.map((msg: unknown, idx: number) =>
-                            renderMessage(msg, idx),
-                          )}
+                        <div class="trace-flat-content">
+                          <div class="trace-messages-list">
+                            ${entry.messages.map((msg: unknown, idx: number) =>
+                              renderMessage(msg, idx),
+                            )}
+                          </div>
                         </div>
                       </div>
                     `
                   : nothing}
 
-                <!-- Tools -->
+                <!-- 工具列表 -->
                 ${entry.tools && entry.tools.length > 0
                   ? html`
-                      <div class="trace-flat-section">
-                        <h3 class="trace-flat-title">
+                      <div class="trace-flat-section ${focusSection && focusSection !== "tools" ? "collapsed" : ""}">
+                        <h3 class="trace-flat-title" @click=${toggleSection}>
+                          <button class="trace-section-toggle" title="${focusSection && focusSection !== "tools" ? "Expand" : "Collapse"}">
+                            ${focusSection && focusSection !== "tools" ? "▶" : "▼"}
+                          </button>
                           Tools
                           <span class="trace-count">(${entry.tools.length})</span>
                         </h3>
-                        <div class="trace-expandable-container">
-                          <div class="trace-tools-list trace-expandable-content">
-                            ${entry.tools.map((tool: TraceToolDef) => renderToolDef(tool))}
+                        <div class="trace-flat-content">
+                          <div class="trace-expandable-container">
+                            <div class="trace-tools-list trace-expandable-content">
+                              ${entry.tools.map((tool: TraceToolDef, idx: number) => renderToolDef(tool, idx))}
+                            </div>
+                            <button class="trace-expand-btn" @click=${toggleExpand}>
+                              Show more ↓
+                            </button>
                           </div>
-                          <button class="trace-expand-btn" @click=${toggleExpand}>
-                            Show more ↓
-                          </button>
                         </div>
                       </div>
                     `
                   : nothing}
 
-                <!-- Error -->
+                <!-- 错误信息 -->
                 ${entry.error
                   ? html`
                       <div class="trace-flat-section">
@@ -590,16 +1122,94 @@ ${entry.prompt}</pre
   `;
 }
 
+// ── 对比弹窗 ───────────────────────────────────────────────────────
+
+/**
+ * 渲染"和上一轮对比"弹窗
+ * 对比当前 trace 和上一轮的差异
+ */
+function renderCompareModal(
+  newEntry: TraceEntry,
+  oldEntry: TraceEntry | null,
+  onClose: () => void,
+) {
+  const diffs = diffEntries(oldEntry, newEntry);
+  const oldLabel = oldEntry ? `#${oldEntry.seq}` : "N/A";
+  const newLabel = `#${newEntry.seq}`;
+
+  return html`
+    <div class="trace-modal-overlay" @click=${onClose}>
+      <div class="trace-modal trace-compare-modal" @click=${(e: Event) => e.stopPropagation()}>
+        <div class="trace-modal-header">
+          <div class="trace-modal-title">
+            <span class="trace-seq-badge mono">Compare</span>
+            <span class="mono">${oldLabel} → ${newLabel}</span>
+          </div>
+          <div class="trace-modal-actions">
+            <button class="btn btn--small" @click=${onClose}>Close</button>
+          </div>
+        </div>
+
+        <div class="trace-modal-body">
+          ${oldEntry
+            ? diffs.length === 0
+              ? html`<div class="trace-compare-empty">没有差异 — 两次请求完全相同</div>`
+              : html`
+                  <div class="trace-compare-table">
+                    <div class="trace-compare-header">
+                      <div class="trace-compare-cell trace-compare-label">Field</div>
+                      <div class="trace-compare-cell trace-compare-old">Previous (#${oldEntry.seq})</div>
+                      <div class="trace-compare-cell trace-compare-new">Current (#${newEntry.seq})</div>
+                    </div>
+                    ${diffs.map(
+                      (diff) => html`
+                        <div class="trace-compare-row">
+                          <div class="trace-compare-cell trace-compare-label">${diff.label}</div>
+                          <div class="trace-compare-cell trace-compare-old ${diff.oldValue === null ? "trace-compare-empty-cell" : ""}">
+                            ${diff.oldValue !== null
+                              ? html`<pre class="trace-compare-value">${diff.oldValue}</pre>`
+                              : html`<span class="muted">—</span>`}
+                          </div>
+                          <div class="trace-compare-cell trace-compare-new ${diff.newValue === null ? "trace-compare-empty-cell" : ""}">
+                            ${diff.newValue !== null
+                              ? html`<pre class="trace-compare-value">${diff.newValue}</pre>`
+                              : html`<span class="muted">—</span>`}
+                          </div>
+                        </div>
+                      `,
+                    )}
+                  </div>
+                `
+            : html`<div class="trace-compare-empty">这是第一条记录，无法对比</div>`}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ── 列表行渲染 ─────────────────────────────────────────────────────
+
+/**
+ * 渲染列表中的单行记录
+ * 显示：序号/时间、会话/阶段、模型、消息数、工具数、预览内容
+ */
 function renderSummaryRow(
   summary: TraceSummary,
-  onViewDetail: (s: TraceSummary) => void,
+  onViewDetail: (s: TraceSummary, focusSection?: string) => void,
+  onCompare: (s: TraceSummary) => void,
 ) {
   const preview = summary.systemPreview || summary.promptPreview || "";
   const hasContent =
     summary.hasSystem || summary.hasPrompt || summary.hasMessages || summary.hasTools;
 
   return html`
-    <tr class="trace-row" @click=${() => onViewDetail(summary)}>
+    <tr class="trace-row" @click=${(e: Event) => {
+      if ((e.target as HTMLElement).closest(".trace-tool-count, .trace-tool-call-count")) {
+        onViewDetail(summary, "tools");
+      } else {
+        onViewDetail(summary);
+      }
+    }}>
       <td class="trace-cell trace-cell-time">
         <div class="trace-cell-stacked">
           <span class="trace-seq mono">#${summary.seq}</span>
@@ -632,9 +1242,17 @@ function renderSummaryRow(
           : html`<span class="muted">-</span>`}
       </td>
       <td class="trace-cell trace-cell-tools">
-        ${summary.toolCount != null && summary.toolCount > 0
-          ? html`<span class="trace-tool-count">${summary.toolCount} tools</span>`
-          : html`<span class="muted">-</span>`}
+        <div class="trace-cell-stacked" style="gap: 2px;">
+          ${summary.toolCount != null && summary.toolCount > 0
+            ? html`<span class="trace-tool-count" style="cursor: pointer;" title="Click to view tools only">${summary.toolCount} tools</span>`
+            : nothing}
+          ${summary.toolCallCount != null && summary.toolCallCount > 0
+            ? html`<span class="trace-tool-call-count" style="cursor: pointer;" title="Click to view tools only">${summary.toolCallCount} calls</span>`
+            : nothing}
+          ${(summary.toolCount == null || summary.toolCount === 0) && (summary.toolCallCount == null || summary.toolCallCount === 0)
+            ? html`<span class="muted">-</span>`
+            : nothing}
+        </div>
       </td>
       <td class="trace-cell trace-cell-preview">
         ${preview
@@ -645,16 +1263,35 @@ function renderSummaryRow(
             ? html`<span class="muted">[has content]</span>`
             : html`<span class="muted">-</span>`}
       </td>
+      <td class="trace-cell trace-cell-compare">
+        <button
+          class="btn btn--small btn--ghost trace-compare-btn"
+          @click=${(e: Event) => {
+            e.stopPropagation();
+            onCompare(summary);
+          }}
+          title="Compare with previous entry"
+        >
+          Compare
+        </button>
+      </td>
     </tr>
   `;
 }
 
+// ── 分页组件渲染 ───────────────────────────────────────────────────
+
+/**
+ * 渲染分页控件
+ * 包含：总条目数、首页、上一页、页码列表、下一页、末页
+ */
 function renderPagination(
   page: number,
   totalPages: number,
   totalLines: number,
   onPageChange: (p: number) => void,
 ) {
+  // 只有一页时只显示条目数
   if (totalPages <= 1) {
     return html`
       <div class="trace-pagination">
@@ -663,6 +1300,7 @@ function renderPagination(
     `;
   }
 
+  // 计算可见页码范围（最多显示 7 个页码）
   const pages: number[] = [];
   const maxVisible = 7;
   let start = Math.max(1, page - Math.floor(maxVisible / 2));
@@ -727,6 +1365,12 @@ function renderPagination(
   `;
 }
 
+// ── 主渲染函数 ─────────────────────────────────────────────────────
+
+/**
+ * 主渲染函数
+ * 渲染完整的 trace 视图，包含：标题、刷新按钮、文件信息、错误提示、分页、表格、详情弹窗
+ */
 export function renderTrace(props: TraceProps) {
   return html`
     <section class="trace-view">
@@ -753,10 +1397,10 @@ export function renderTrace(props: TraceProps) {
           : nothing}
       </div>
 
-      <!-- Pagination top -->
+      <!-- 顶部分页 -->
       ${renderPagination(props.page, props.totalPages, props.totalLines, props.onPageChange)}
 
-      <!-- Table -->
+      <!-- 表格容器 -->
       <div class="trace-table-container card">
         ${props.summaries.length === 0
           ? html`<div class="muted" style="padding: 20px">No trace entries.</div>`
@@ -770,21 +1414,27 @@ export function renderTrace(props: TraceProps) {
                     <th>Msgs</th>
                     <th>Tools</th>
                     <th>Preview</th>
+                    <th>Compare</th>
                   </tr>
                 </thead>
                 <tbody>
-                  ${props.summaries.map((s) => renderSummaryRow(s, props.onViewDetail))}
+                  ${props.summaries.map((s) => renderSummaryRow(s, props.onViewDetail, props.onCompare))}
                 </tbody>
               </table>
             `}
       </div>
 
-      <!-- Pagination bottom -->
+      <!-- 底部分页 -->
       ${renderPagination(props.page, props.totalPages, props.totalLines, props.onPageChange)}
 
-      <!-- Detail Modal -->
+      <!-- 详情弹窗 -->
       ${props.detailEntry
-        ? renderDetailModal(props.detailEntry, props.detailLoading, props.onCloseDetail)
+        ? renderDetailModal(props.detailEntry, props.detailLoading, props.onCloseDetail, props.focusSection ?? undefined)
+        : nothing}
+
+      <!-- 对比弹窗 -->
+      ${props.compareEntry
+        ? renderCompareModal(props.compareEntry, props.compareOldEntry, props.onCloseCompare)
         : nothing}
     </section>
   `;

@@ -54,6 +54,7 @@ export interface TraceSummary {
   modelApi?: string | null;
   messageCount?: number;
   toolCount?: number;
+  toolCallCount?: number;
   note?: string;
   error?: string;
   systemPreview?: string;
@@ -62,6 +63,7 @@ export interface TraceSummary {
   hasPrompt?: boolean;
   hasMessages?: boolean;
   hasTools?: boolean;
+  hasToolCalls?: boolean;
 }
 
 export interface TraceApiResponse {

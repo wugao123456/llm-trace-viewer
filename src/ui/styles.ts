@@ -375,6 +375,16 @@ export const traceStyles = `
     color: var(--text-secondary);
   }
 
+  .trace-tool-call-count {
+    font-size: 0.85em;
+    color: var(--color-info);
+    font-weight: 500;
+    background: var(--color-info-bg);
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--color-info-border);
+  }
+
   .trace-cell-tools {
     white-space: nowrap;
   }
@@ -639,6 +649,47 @@ export const traceStyles = `
     display: flex;
     gap: 8px;
     align-items: center;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .trace-section-toggle {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    font-size: 0.7em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+
+  .trace-section-toggle:hover {
+    background: var(--bg-tertiary);
+    color: var(--text);
+  }
+
+  .trace-flat-content {
+    margin-top: 10px;
+    overflow: hidden;
+    transition: max-height 0.2s ease, opacity 0.2s ease;
+    max-height: 0;
+    opacity: 0;
+  }
+
+  .trace-flat-section:not(.collapsed) .trace-flat-content {
+    max-height: 5000px;
+    opacity: 1;
+  }
+
+  .trace-flat-section.collapsed .trace-flat-title {
+    border-bottom-color: var(--border-light);
   }
 
   .trace-flat-title--danger {
@@ -751,6 +802,40 @@ export const traceStyles = `
 
   .trace-message-body {
     padding: 0 0 12px 0;
+    overflow: hidden;
+    transition: max-height 0.2s ease, opacity 0.2s ease;
+    max-height: 5000px;
+    opacity: 1;
+  }
+
+  .trace-message.collapsed .trace-message-body {
+    max-height: 0;
+    opacity: 0;
+    padding-bottom: 0;
+  }
+
+  .trace-message-header {
+    cursor: pointer;
+  }
+
+  .trace-message-toggle {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.65em;
+    padding: 0;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
+
+  .trace-message-header:hover .trace-message-toggle {
+    color: var(--text);
   }
 
   .trace-message-role {
@@ -831,6 +916,77 @@ export const traceStyles = `
     border: 1px solid var(--border-color);
   }
 
+  /* Tool Calls (assistant 消息中的工具调用) */
+  .trace-tool-calls {
+    margin: 12px 0;
+    padding: 12px 14px;
+    background: var(--color-info-bg);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-info-border);
+  }
+
+  .trace-tool-calls-title {
+    font-size: 0.82em;
+    font-weight: 600;
+    color: var(--color-info);
+    margin-bottom: 10px;
+    letter-spacing: 0.03em;
+  }
+
+  .trace-tool-call {
+    margin-bottom: 10px;
+    padding: 10px;
+    background: var(--bg-surface);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+  }
+
+  .trace-tool-call:last-child {
+    margin-bottom: 0;
+  }
+
+  .trace-tool-call-header {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .trace-tool-call-index {
+    font-size: 0.75em;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--bg-secondary);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  .trace-tool-call-name {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
+    font-size: 0.88em;
+    font-weight: 600;
+    color: var(--color-info);
+  }
+
+  .trace-tool-call-id {
+    font-size: 0.75em;
+    color: var(--text-muted);
+    margin-left: auto;
+  }
+
+  .trace-tool-call-args {
+    margin: 0;
+    padding: 8px 10px;
+    background: var(--bg-code);
+    border-radius: 4px;
+    font-size: 0.82em;
+    overflow-x: auto;
+    max-height: 200px;
+    border: 1px solid var(--border-color);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
   /* Tools list in detail modal */
   .trace-tools-list {
     display: flex;
@@ -855,6 +1011,56 @@ export const traceStyles = `
     display: flex;
     align-items: center;
     gap: 8px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .trace-tool-def-toggle {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.6em;
+    padding: 0;
+    cursor: pointer;
+    width: 12px;
+    height: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .trace-tool-def-header:hover .trace-tool-def-toggle {
+    color: var(--text);
+  }
+
+  .trace-tool-def-index {
+    color: var(--text-muted);
+    font-size: 0.75em;
+    flex-shrink: 0;
+  }
+
+  .trace-tool-def-desc-preview {
+    color: var(--text-muted);
+    font-size: 0.78em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .trace-tool-def-body {
+    overflow: hidden;
+    transition: max-height 0.2s ease, opacity 0.2s ease;
+    max-height: 2000px;
+    opacity: 1;
+  }
+
+  .trace-tool-def.collapsed .trace-tool-def-body {
+    max-height: 0;
+    opacity: 0;
   }
 
   .trace-tool-name {
@@ -1109,6 +1315,94 @@ export const traceStyles = `
 
   .trace-value {
     word-break: break-word;
+  }
+
+  /* ── 对比弹窗 ───────────────────────────────────────── */
+  .trace-compare-btn {
+    font-size: 0.75em !important;
+    padding: 2px 8px !important;
+    white-space: nowrap;
+  }
+
+  .trace-compare-table {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .trace-compare-header {
+    display: grid;
+    grid-template-columns: 140px 1fr 1fr;
+    background: var(--bg-secondary);
+    border-bottom: 2px solid var(--border-color);
+  }
+
+  .trace-compare-header .trace-compare-cell {
+    font-weight: 700;
+    font-size: 0.82em;
+    color: var(--text-secondary);
+    padding: 8px 12px;
+  }
+
+  .trace-compare-row {
+    display: grid;
+    grid-template-columns: 140px 1fr 1fr;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .trace-compare-row:last-child {
+    border-bottom: none;
+  }
+
+  .trace-compare-cell {
+    padding: 8px 12px;
+    font-size: 0.83em;
+    line-height: 1.5;
+  }
+
+  .trace-compare-label {
+    background: var(--bg-secondary);
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: flex-start;
+    border-right: 1px solid var(--border-color);
+  }
+
+  .trace-compare-old {
+    background: rgba(255, 0, 0, 0.04);
+  }
+
+  .trace-compare-new {
+    background: rgba(0, 200, 0, 0.04);
+  }
+
+  .trace-compare-empty-cell {
+    opacity: 0.5;
+  }
+
+  .trace-compare-value {
+    margin: 0;
+    font-size: 0.82em;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+    background: none;
+    padding: 0;
+    color: var(--text);
+    line-height: 1.4;
+  }
+
+  .trace-compare-empty {
+    padding: 40px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 1em;
   }
 
   /* Scrollbar styling */

@@ -1,14 +1,20 @@
 /**
- * Local File Parser
- * Parses trace files entirely in the browser.
- * Supports JSONL format and nginx access log format (with request_body field).
+ * 文件解析器（浏览器端）
+ * 在浏览器中解析 trace 文件，支持两种格式：
+ * 1. JSONL 格式：每行一个 JSON 对象
+ * 2. Nginx 访问日志格式：包含 request_body 字段的嵌入式 JSON
  */
 
 import type { TraceEntry, TraceSummary } from "./types.js";
 
-// ── Summary generation ─────────────────────────────────────────────
+// ── 摘要生成 ─────────────────────────────────────────────────────────
 
+/**
+ * 将完整的 TraceEntry 转换为 TraceSummary（用于列表展示）
+ * 提取关键信息并生成预览内容，减少内存占用
+ */
 function toSummary(entry: TraceEntry): TraceSummary {
+  // 系统提示词预览：截取前 120 个字符，对象类型则 JSON 序列化后截取
   const systemPreview =
     typeof entry.system === "string"
       ? entry.system.slice(0, 120)
@@ -16,7 +22,20 @@ function toSummary(entry: TraceEntry): TraceSummary {
         ? JSON.stringify(entry.system).slice(0, 120)
         : undefined;
 
+  // 用户提示词预览：截取前 120 个字符
   const promptPreview = entry.prompt?.slice(0, 120);
+
+  // 统计 messages 中所有 tool_calls 的数量
+  let toolCallCount = 0;
+  if (entry.messages) {
+    for (const msg of entry.messages) {
+      const m = msg as Record<string, unknown>;
+      const calls = m.tool_calls;
+      if (calls && Array.isArray(calls)) {
+        toolCallCount += calls.length;
+      }
+    }
+  }
 
   return {
     ts: entry.ts,
@@ -30,6 +49,7 @@ function toSummary(entry: TraceEntry): TraceSummary {
     modelApi: entry.modelApi,
     messageCount: entry.messageCount ?? entry.messages?.length,
     toolCount: entry.toolCount ?? entry.tools?.length,
+    toolCallCount,
     note: entry.note,
     error: entry.error,
     systemPreview,
@@ -38,10 +58,11 @@ function toSummary(entry: TraceEntry): TraceSummary {
     hasPrompt: entry.prompt != null && entry.prompt.length > 0,
     hasMessages: entry.messages != null && entry.messages.length > 0,
     hasTools: entry.tools != null && entry.tools.length > 0,
+    hasToolCalls: toolCallCount > 0,
   };
 }
 
-// ── Result types ───────────────────────────────────────────────────
+// ── 结果类型 ─────────────────────────────────────────────────────────
 
 export interface ParseResult {
   entries: TraceEntry[];
@@ -49,13 +70,13 @@ export interface ParseResult {
   error?: string;
 }
 
-// ── Nginx access log parser ────────────────────────────────────────
+// ── Nginx 访问日志解析器 ────────────────────────────────────────────
 
 /**
- * Extract the request_body JSON from a nginx access log line.
- * The format is: ... "request_body:{...JSON...}" "upstream_response_time:..." ...
+ * 从 Nginx 访问日志行中提取 request_body JSON
+ * 日志格式示例：... "request_body:{...JSON...}" "upstream_response_time:..." ...
  *
- * Uses brace counting to find the end of the JSON object.
+ * 使用括号计数法找到 JSON 对象的结束位置，支持嵌套对象
  */
 function extractNginxRequestBody(line: string): string | null {
   const marker = '"request_body:';
@@ -64,7 +85,7 @@ function extractNginxRequestBody(line: string): string | null {
 
   const jsonStart = idx + marker.length;
 
-  // Use brace counting to find matching closing brace
+  // 使用括号计数法找到匹配的闭合括号
   let depth = 0;
   let inString = false;
   let escaped = false;
@@ -94,7 +115,7 @@ function extractNginxRequestBody(line: string): string | null {
     } else if (ch === "}") {
       depth--;
       if (depth === 0) {
-        // Found the matching closing brace
+        // 找到匹配的闭合括号
         return line.substring(jsonStart, i + 1);
       }
     }
@@ -104,14 +125,14 @@ function extractNginxRequestBody(line: string): string | null {
 }
 
 /**
- * Extract timestamp from nginx log line.
- * Format: [30/Jun/2026:20:39:33 +0800]
+ * 从 Nginx 日志行中提取时间戳
+ * 格式：[30/Jun/2026:20:39:33 +0800]
  */
 function extractNginxTimestamp(line: string): string | null {
   const match = line.match(/\[(\d{2}\/[A-Z][a-z]{2}\/\d{4}:\d{2}:\d{2}:\d{2}\s[+-]\d{4})\]/);
   if (!match) return null;
 
-  // Parse nginx date format to ISO
+  // 将 Nginx 日期格式解析为 ISO 格式
   const parts = match[1].match(
     /(\d{2})\/([A-Z][a-z]{2})\/(\d{4}):(\d{2}):(\d{2}):(\d{2})\s([+-]\d{4})/,
   );
@@ -125,7 +146,7 @@ function extractNginxTimestamp(line: string): string | null {
   if (!month) return match[1];
 
   const [, day, , year, hour, min, sec, tz] = parts;
-  // Format as ISO 8601
+  // 格式化为 ISO 8601
   const tzSign = tz[0];
   const tzHours = tz.slice(1, 3);
   const tzMins = tz.slice(3, 5);
@@ -133,13 +154,14 @@ function extractNginxTimestamp(line: string): string | null {
 }
 
 /**
- * Convert a chat completion request body into a TraceEntry.
+ * 将 chat completion 请求体转换为 TraceEntry
+ * 从请求体中提取 system prompt、user prompt、messages、tools 等信息
  */
 function requestBodyToEntry(body: Record<string, unknown>, ts: string, seq: number): TraceEntry {
   const messages = body.messages as unknown[] | undefined;
   const tools = body.tools as Record<string, unknown>[] | undefined;
 
-  // Extract system prompt from messages array
+  // 从 messages 数组中提取系统提示词
   let system: unknown = undefined;
   let prompt: string | undefined;
 
@@ -151,7 +173,7 @@ function requestBodyToEntry(body: Record<string, unknown>, ts: string, seq: numb
       system = (sysMsg as Record<string, unknown>).content;
     }
 
-    // Get last user message as prompt preview
+    // 获取最后一条用户消息作为提示词预览
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i] as Record<string, unknown>;
       if (msg.role === "user") {
@@ -159,6 +181,7 @@ function requestBodyToEntry(body: Record<string, unknown>, ts: string, seq: numb
         if (typeof content === "string") {
           prompt = content.slice(0, 500);
         } else if (Array.isArray(content)) {
+          // 处理多模态内容，提取所有 text 类型部分
           const textParts = content
             .filter((p: Record<string, unknown>) => p.type === "text")
             .map((p: Record<string, unknown>) => p.text as string)
@@ -170,7 +193,7 @@ function requestBodyToEntry(body: Record<string, unknown>, ts: string, seq: numb
     }
   }
 
-  // Normalize tool definitions
+  // 标准化工具定义格式
   const normalizedTools = tools?.map((t) => {
     const func = (t.function || t) as Record<string, unknown>;
     return {
@@ -196,6 +219,9 @@ function requestBodyToEntry(body: Record<string, unknown>, ts: string, seq: numb
   };
 }
 
+/**
+ * 根据模型 ID 提取服务商信息
+ */
 function extractProvider(modelId?: string): string | undefined {
   if (!modelId) return undefined;
   if (modelId.startsWith("qwen")) return "qwen";
@@ -204,6 +230,10 @@ function extractProvider(modelId?: string): string | undefined {
   return undefined;
 }
 
+/**
+ * 解析 Nginx 访问日志格式
+ * 流程：逐行扫描 → 提取 request_body → 解析 JSON → 转换为 TraceEntry
+ */
 function parseNginxLog(content: string): ParseResult {
   const lines = content.split("\n");
   const entries: TraceEntry[] = [];
@@ -214,7 +244,7 @@ function parseNginxLog(content: string): ParseResult {
     const line = lines[i].trim();
     if (!line) continue;
 
-    // Skip lines that don't look like chat completion requests
+    // 跳过不像是 chat completion 请求的行
     if (!line.includes("chat/completions") && !line.includes("request_body:")) {
       continue;
     }
@@ -243,8 +273,12 @@ function parseNginxLog(content: string): ParseResult {
   return { entries, summaries };
 }
 
-// ── JSONL parser ───────────────────────────────────────────────────
+// ── JSONL 解析器 ────────────────────────────────────────────────────
 
+/**
+ * 解析 JSONL 格式
+ * 流程：逐行扫描 → 解析 JSON → 补充 seq（如缺失）→ 转换为 TraceEntry
+ */
 function parseJSONL(content: string): ParseResult {
   const lines = content.split("\n");
   const entries: TraceEntry[] = [];
@@ -256,6 +290,7 @@ function parseJSONL(content: string): ParseResult {
 
     try {
       const entry = JSON.parse(line) as TraceEntry;
+      // 如果没有 seq，使用行号作为序号
       if (entry.seq == null) {
         entry.seq = i + 1;
       }
@@ -273,26 +308,26 @@ function parseJSONL(content: string): ParseResult {
   return { entries, summaries };
 }
 
-// ── Auto-detect & parse ────────────────────────────────────────────
+// ── 自动检测与解析入口 ──────────────────────────────────────────────
 
 /**
- * Parse file content, auto-detecting the format.
- * Supports:
- * - JSONL: each line is a JSON object
- * - Nginx access log: lines contain "request_body:" with embedded JSON
+ * 解析文件内容，自动检测格式
+ * 支持：
+ * - JSONL：每行一个 JSON 对象
+ * - Nginx 访问日志：行中包含 "request_body:" 及嵌入式 JSON
  */
 export function parseFile(content: string): ParseResult {
-  // Try nginx format first if it contains the marker
+  // 如果包含 Nginx 格式标记，优先尝试 Nginx 格式解析
   if (content.includes('"request_body:')) {
     const result = parseNginxLog(content);
     if (result.entries.length > 0) return result;
   }
 
-  // Fall back to JSONL
+  // 回退到 JSONL 格式解析
   return parseJSONL(content);
 }
 
-// ── Pagination ─────────────────────────────────────────────────────
+// ── 分页逻辑 ───────────────────────────────────────────────────────
 
 export interface PageResult {
   summaries: TraceSummary[];
@@ -302,6 +337,10 @@ export interface PageResult {
   totalPages: number;
 }
 
+/**
+ * 根据页码和每页大小获取分页数据
+ * 自动处理边界情况（页码超出范围时自动调整）
+ */
 export function getPage(
   summaries: TraceSummary[],
   page: number,
@@ -309,6 +348,7 @@ export function getPage(
 ): PageResult {
   const totalLines = summaries.length;
   const totalPages = Math.max(1, Math.ceil(totalLines / pageSize));
+  // 确保页码在有效范围内
   const safePage = Math.max(1, Math.min(page, totalPages));
   const start = (safePage - 1) * pageSize;
   const slice = summaries.slice(start, start + pageSize);
@@ -322,12 +362,18 @@ export function getPage(
   };
 }
 
+/**
+ * 根据序列号查找完整的 TraceEntry
+ */
 export function getEntryBySeq(entries: TraceEntry[], seq: number): TraceEntry | null {
   return entries.find((e) => e.seq === seq) ?? null;
 }
 
-// ── File reading ───────────────────────────────────────────────────
+// ── 文件读取 ───────────────────────────────────────────────────────
 
+/**
+ * 使用 FileReader 将 File 对象读取为文本
+ */
 export function readFileAsText(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
